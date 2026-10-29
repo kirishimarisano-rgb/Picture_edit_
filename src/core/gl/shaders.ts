@@ -395,11 +395,11 @@ void main() {
     if (aspect < 1.0) inset = vec2(m, m * aspect);
     iuv = (uv - inset) / (1.0 - 2.0 * inset);
     // 片框內緣略帶不規則：用低頻雜訊推動邊界
-    float jag = vnoise(uv * uFull / 7.0, 99) * 0.0016 + vnoise(uv * uFull / 41.0, 98) * 0.003;
+    float jag = vnoise(uv * uFull / 9.0, 99) * 0.00035 + vnoise(uv * uFull / 60.0, 98) * 0.0012;
     vec2 q = abs(iuv - 0.5) * 2.0;
     vec2 cr = vec2(0.012 / aspect, 0.012);
     vec2 d = max(q - (1.0 - cr), 0.0) / cr;
-    rebate = q.x > 1.0 + jag || q.y > 1.0 + jag || length(d) > 1.0 + jag * 30.0;
+    rebate = q.x > 1.0 + jag || q.y > 1.0 + jag || length(d) > 1.0 + jag * 20.0;
   }
   vec4 dev = texture(uDev, iuv);
   vec3 x = max(dev.rgb, 0.0);
@@ -452,8 +452,8 @@ void main() {
     y = uFade + (1.0 - uFade) * y;
     outc = mix(x, y, uStrength);
     if (rebate) {
-      float n = vnoise(uv * uFull / 3.0, 7) * 0.004;
-      outc = vec3(0.006 + n);
+      float n = vnoise(uv * uFull / 2.0, 7) * 0.0012;
+      outc = vec3(0.0045 + n);
     }
   }
 

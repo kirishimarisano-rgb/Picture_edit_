@@ -437,7 +437,7 @@ export class Renderer {
 
   // ───────────── 讀回 ─────────────
 
-  private read(t: Target): Uint8Array {
+  private read(t: Target): Uint8Array<ArrayBuffer> {
     const gl = this.gl;
     const px = new Uint8Array(t.w * t.h * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
@@ -447,7 +447,7 @@ export class Renderer {
   }
 
   /** 縮小讀回預覽結果（直方圖、縮圖用）；第 0 列 = 影像頂端 */
-  readSmall(long: number, from: 'preview' | 'side' = 'preview'): { data: Uint8Array; w: number; h: number } | null {
+  readSmall(long: number, from: 'preview' | 'side' = 'preview'): Pixels | null {
     const src = (from === 'preview' ? this.preview : this.side).out;
     if (!src) return null;
     const k = Math.min(1, long / Math.max(src.w, src.h));
@@ -472,7 +472,7 @@ export class Renderer {
   }
 
   /** 用另一份狀態在小緩衝算一張預覽（底片配方縮圖），不影響主預覽 */
-  renderVariant(s: EditState, long: number): { data: Uint8Array; w: number; h: number } | null {
+  renderVariant(s: EditState, long: number): Pixels | null {
     if (!this.srcTex) return null;
     const [fw, fh] = outputSize(this.srcW, this.srcH, s.geometry);
     this.runPipeline(this.side, { scale: long / Math.max(fw, fh) }, s);
@@ -480,7 +480,7 @@ export class Renderer {
   }
 
   /** 匯出：以指定比例算全圖並讀回 RGBA（第 0 列 = 頂端） */
-  renderExport(scale: number, s?: EditState): { data: Uint8Array; w: number; h: number } {
+  renderExport(scale: number, s?: EditState): Pixels {
     const st = s ?? this.state!;
     if (s) this.setState(s);
     this.runPipeline(this.side, { scale }, st);
@@ -537,4 +537,14 @@ export class Renderer {
   static get brushLong() {
     return BRUSH_LONG;
   }
+}
+
+export interface Pixels {
+  data: Uint8Array<ArrayBuffer>;
+  w: number;
+  h: number;
+}
+
+export function toImageData(p: Pixels): ImageData {
+  return new ImageData(new Uint8ClampedArray(p.data.buffer, p.data.byteOffset, p.data.byteLength), p.w, p.h);
 }
