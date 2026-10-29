@@ -336,6 +336,7 @@ uniform vec2 uFull;        // 輸出影像的全解析度尺寸（顆粒以此�
 uniform bool uFilmOn;
 uniform float uStrength;
 uniform float uFilmExposure, uGamma, uToeR, uShoulderR, uFade;
+uniform vec2 uWhite; // 白點補償（stops）、白點的 s
 uniform mat3 uCross;
 uniform float uFilmSat;
 uniform bool uMono;
@@ -380,7 +381,8 @@ float grainField(vec2 p, int seed) {
 
 float curve(float s, float g) {
   float R = s >= 0.0 ? uShoulderR : -uToeR;
-  float Y = log2(0.18) + R * tanh(g * s / R);
+  float w = clamp(s / uWhite.y, 0.0, 1.0);
+  float Y = log2(0.18) + R * tanh(g * s / R) + uWhite.x * w * w;
   return min(1.0, exp2(Y));
 }
 

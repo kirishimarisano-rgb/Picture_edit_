@@ -13,61 +13,87 @@ export function toGray(rgba: Uint8ClampedArray | Uint8Array, w: number, h: numbe
 }
 
 /**
- * 自動拉直：統計強邊緣的方向，找出最接近水平（或垂直）的主要方向偏了幾度。
- * 回傳要套用的拉直角度（度）；畫面上的線會因此變水平。
+ * 自動拉直：限定方向的霍夫轉換。
+ * 對每個候選傾角 δ，只讓「梯度方向符合」的邊緣像素投票到對應的直線上，
+ * 再以 Σ票數² 評分（長而直的線，像地平線、建築、樹幹，分數會遠高於零散的紋理）。
+ * 回傳要套用的拉直角度（度）；畫面上的線會因此變水平／垂直。
  */
-export function detectTilt(g: Gray, maxDeg = 20): number {
-  const { data, w, h } = g;
-  const binsPerDeg = 10;
-  const nb = maxDeg * 2 * binsPerDeg + 1;
-  const hist = new Float64Array(nb);
+export function detectTilt(input: Gray, maxDeg = 15, debug?: { ratio?: number }): number {
+  const { data, w, h } = input;
+  const px: number[] = [], py: number[] = [], pa: number[] = [], pm: number[] = [];
   const mags: number[] = [];
-  const gx = new Float32Array(w * h), gy = new Float32Array(w * h);
+  const gxA = new Float32Array(w * h), gyA = new Float32Array(w * h);
   for (let y = 1; y < h - 1; y++)
     for (let x = 1; x < w - 1; x++) {
       const i = y * w + x;
       const a = data[i - w - 1], b = data[i - w], c = data[i - w + 1];
       const d = data[i - 1], f = data[i + 1];
       const gg = data[i + w - 1], hh = data[i + w], ii = data[i + w + 1];
-      gx[i] = c + 2 * f + ii - a - 2 * d - gg;
-      gy[i] = gg + 2 * hh + ii - a - 2 * b - c;
-      if ((x + y) % 7 === 0) mags.push(Math.hypot(gx[i], gy[i]));
+      gxA[i] = c + 2 * f + ii - a - 2 * d - gg;
+      gyA[i] = gg + 2 * hh + ii - a - 2 * b - c;
+      if ((x * 7 + y * 3) % 11 === 0) mags.push(Math.hypot(gxA[i], gyA[i]));
     }
   mags.sort((p, q) => p - q);
-  const thr = Math.max(0.08, mags[Math.floor(mags.length * 0.9)] ?? 0.1);
-  for (let y = 2; y < h - 2; y++)
-    for (let x = 2; x < w - 2; x++) {
+  const thr = Math.max(0.06, mags[Math.floor(mags.length * 0.9)] ?? 0.1);
+  const margin = Math.round(Math.min(w, h) * 0.02) + 2;
+  for (let y = margin; y < h - margin; y++)
+    for (let x = margin; x < w - margin; x++) {
       const i = y * w + x;
-      const m = Math.hypot(gx[i], gy[i]);
+      const m = Math.hypot(gxA[i], gyA[i]);
       if (m < thr) continue;
-      // 邊緣方向 = 梯度方向 + 90°，折到 (-90, 90]
-      let ang = (Math.atan2(gy[i], gx[i]) * 180) / Math.PI + 90;
-      while (ang > 90) ang -= 180;
-      while (ang <= -90) ang += 180;
-      let dev: number, wgt: number;
-      if (Math.abs(ang) <= maxDeg) { dev = ang; wgt = 1; }
-      else if (Math.abs(Math.abs(ang) - 90) <= maxDeg) { dev = ang > 0 ? ang - 90 : ang + 90; wgt = 0.6; }
-      else continue;
-      const bin = Math.round((dev + maxDeg) * binsPerDeg);
-      hist[bin] += m * m * wgt;
+      // 簡易非極大值抑制：沿梯度方向比較鄰居，讓邊緣變細
+      const ux = gxA[i] / m, uy = gyA[i] / m;
+      const j1 = Math.round(y + uy) * w + Math.round(x + ux), j2 = Math.round(y - uy) * w + Math.round(x - ux);
+      if (Math.hypot(gxA[j1], gyA[j1]) > m || Math.hypot(gxA[j2], gyA[j2]) > m) continue;
+      let ang = (Math.atan2(gyA[i], gxA[i]) * 180) / Math.PI; // 梯度方向
+      ang = ((ang % 180) + 180) % 180; // 0..180
+      px.push(x); py.push(y); pa.push(ang); pm.push(Math.min(m, thr * 3));
     }
+  const tol = 5;
+  const step = 0.1;
+  const n = Math.round((2 * maxDeg) / step) + 1;
+  const score = new Float64Array(n);
+  const diag = Math.ceil(Math.hypot(w, h));
+  const acc = new Float32Array(diag * 2 + 4);
+  const angDiff = (a: number, b: number) => { const d = Math.abs(a - b) % 180; return Math.min(d, 180 - d); };
+  for (let k = 0; k < n; k++) {
+    const dDeg = -maxDeg + k * step;
+    const dr = (dDeg * Math.PI) / 180;
+    const sn = Math.sin(dr), cs = Math.cos(dr);
+    for (const fam of [0, 1]) {
+      acc.fill(0);
+      const expect = fam === 0 ? dDeg + 90 : dDeg; // 水平線的梯度朝上下，垂直線朝左右
+      for (let p = 0; p < px.length; p++) {
+        if (angDiff(pa[p], expect) > tol) continue;
+        const rho = fam === 0 ? -px[p] * sn + py[p] * cs : px[p] * cs + py[p] * sn;
+        acc[Math.round(rho) + diag] += pm[p];
+      }
+      let sc = 0;
+      // 相鄰兩格合併，避免線剛好跨在兩個 ρ 之間
+      for (let r = 0; r < acc.length - 1; r++) { const v = acc[r] + acc[r + 1]; sc += v * v; }
+      score[k] += fam === 0 ? sc : sc * 0.8;
+    }
+  }
   // 平滑後找峰值
-  const sm = new Float64Array(nb);
-  for (let i = 0; i < nb; i++)
-    for (let k = -6; k <= 6; k++) {
+  const sm = new Float64Array(n);
+  for (let i = 0; i < n; i++)
+    for (let k = -3; k <= 3; k++) {
       const j = i + k;
-      if (j >= 0 && j < nb) sm[i] += hist[j] * Math.exp(-(k * k) / 18);
+      if (j >= 0 && j < n) sm[i] += score[j] * Math.exp(-(k * k) / 4);
     }
-  let best = (nb - 1) / 2;
-  for (let i = 0; i < nb; i++) if (sm[i] > sm[best]) best = i;
-  // 拋物線內插求次 bin 精度
+  let best = Math.floor(n / 2);
+  for (let i = 0; i < n; i++) if (sm[i] > sm[best]) best = i;
   let peak = best;
-  if (best > 0 && best < nb - 1) {
+  if (best > 0 && best < n - 1) {
     const a = sm[best - 1], b = sm[best], c = sm[best + 1];
     const den = a - 2 * b + c;
     if (den !== 0) peak = best + (0.5 * (a - c)) / den;
   }
-  const dev = peak / binsPerDeg - maxDeg;
+  const dev = -maxDeg + peak * step;
+  // 峰值不夠突出（沒有明確的直線）就不動
+  const mean = sm.reduce((s2, v) => s2 + v, 0) / n;
+  if (debug) debug.ratio = sm[best] / mean;
+  if (sm[best] < mean * 1.15) return 0;
   return Math.abs(dev) < 0.05 ? 0 : -dev;
 }
 

@@ -51,3 +51,20 @@ function diff(a: Uint8Array) {
   return { results, stocks };
 };
 (window as any).ready = true;
+
+// 灰階梯：檢查每種配方在不同亮度的色偏
+(window as any).rampTest = () => {
+  const W2 = 256, H2 = 8;
+  const img = new ImageData(W2, H2);
+  for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) img.data.set([x, x, x, 255], (y * W2 + x) * 4);
+  r.loadSource(img, W2, H2);
+  const out: Record<string, string> = {};
+  for (const st of BUILTIN_STOCKS) {
+    const s = defaultState(); s.film = { ...st.params, grain: 0, vignette: 0, leak: 0, halation: 0, bloom: 0 };
+    r.setState(s);
+    const d = r.renderExport(1, s).data;
+    out[st.id] = [16, 64, 128, 192, 240].map((x) => { const i = (4 * W2 + x) * 4; return `${d[i]},${d[i + 1]},${d[i + 2]}`; }).join(' | ');
+  }
+  r.loadSource(src, W, H);
+  return out;
+};

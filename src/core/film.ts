@@ -17,12 +17,29 @@ export function shoulderRange(shoulder: number): number {
   return 4.5 - (shoulder / 100) * (4.5 + Math.log2(MID_GREY)); // 4.5 → 2.47 stops（剛好收在 1.0）
 }
 
+const WHITE_S = Math.log2(1 / MID_GREY);
+
+function rawCurve(s: number, g: number, toe: number, shoulder: number): number {
+  const R = s >= 0 ? shoulderRange(shoulder) : -toeRange(toe);
+  return LOG2_MID + R * Math.tanh((g * s) / R);
+}
+
+/**
+ * 相紙白點補償：讓「輸入的白」仍然印成白，肩部只負責亮部怎麼收，而不是把整張照片壓灰。
+ * 回傳 [補償量（stops）, 白點的 s]，shader 用同樣的兩個數。
+ */
+export function whiteLift(f: Pick<Film, 'gamma' | 'toe' | 'shoulder' | 'filmExposure'>): [number, number] {
+  const sw = WHITE_S + f.filmExposure;
+  if (sw <= 0.05) return [0, 1];
+  return [Math.max(0, -rawCurve(sw, f.gamma, f.toe, f.shoulder)), sw];
+}
+
 /** 單一通道：線性曝光 → 線性輸出（0..1） */
 export function filmCurve(x: number, f: Pick<Film, 'gamma' | 'toe' | 'shoulder' | 'fade' | 'filmExposure'>, offset = 0, gammaMul = 1): number {
   const s = Math.log2(Math.max(x, 1e-6) / MID_GREY) + f.filmExposure + offset;
-  const g = f.gamma * gammaMul;
-  const R = s >= 0 ? shoulderRange(f.shoulder) : -toeRange(f.toe);
-  const Y = LOG2_MID + R * Math.tanh((g * s) / R);
+  const [lift, sw] = whiteLift(f);
+  const w = Math.min(1, Math.max(0, s / sw));
+  const Y = rawCurve(s, f.gamma * gammaMul, f.toe, f.shoulder) + lift * w * w;
   const y = Math.min(1, Math.pow(2, Y));
   const fl = (f.fade / 100) * 0.06;
   return fl + (1 - fl) * y;

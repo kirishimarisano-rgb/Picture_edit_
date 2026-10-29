@@ -1,5 +1,5 @@
 import { buildCurveLut } from '../curves';
-import { shoulderRange, toeRange } from '../film';
+import { shoulderRange, toeRange, whiteLift } from '../film';
 import { outputSize, outputToSource, type Affine } from '../geometry';
 import { BRUSH_LONG, brushSize, drawDab } from '../brush';
 import { HSL_BANDS, sectionModified, type BrushMask, type EditState } from '../state';
@@ -378,6 +378,7 @@ export class Renderer {
     gl.uniform1f(u('uToeR'), toeRange(F.toe));
     gl.uniform1f(u('uShoulderR'), shoulderRange(F.shoulder));
     gl.uniform1f(u('uFade'), (F.fade / 100) * 0.06);
+    gl.uniform2f(u('uWhite'), ...whiteLift(F));
     const c = (F.crosstalk / 100) * 0.35;
     // 列：每個感光層從其他層「借」到的曝光
     const N = [0, 0.7, 0.3, 0.45, 0, 0.55, 0.25, 0.75, 0];
